@@ -1,0 +1,35 @@
+// Run `protoc --go_out=. ptprotos/*.proto` to generate *.pb.go file.
+package ptprotos;
+
+// Parameters for the Pingtest algorithm sent from the client to the server.
+// The client sends UDP packets of varying size to the server. The server sends
+// a tiny TCP ACK back to the client. The client then updates its sending packet
+// size accordingly.
+message PingtestParams {
+  // The index of the current packet that the client sends.
+  // This field is 0 indexed.
+  optional int64 packet_index = 1;
+
+  // The size of the packet, in bytes, that the client sends the server. This
+  // includes padding.
+  optional int64 packet_size_bytes = 2;
+}
+
+
+// The message that is sent on the wire from the client to the server.
+message PingtestMessage {
+  // Parameters for the pingtest algorithm.
+  optional PingtestParams pingtest_params = 1;
+
+  // Extra bytes to pad the payload to a specific size.
+  // Bytes are randomized to mitigate caching.
+  optional bytes padding = 2;
+
+  // The direction of the pingtest.
+  enum Type {
+    UNKNOWN = 0;
+    UPLOAD = 1;
+    DOWNLOAD = 2;
+  }
+  optional Type type = 3;
+}
