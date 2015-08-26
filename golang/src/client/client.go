@@ -1,4 +1,22 @@
-// Package pingtest implements a lightweight bandwidth estimation using 'ping.'
+// Package client implements a lightweight bandwidth estimation using a modified UDP
+// implementation of ping.
+//
+// Example usage from golang/bin/
+//  # Runs a basic client *locally* that sends UDP packets of varying size.
+//  # See white paper for details.
+//	./client
+//
+//	# Specify ports to receive and send on and to.
+//	./client --server_ip="192.168.2.5" --client_rcv_port=1002 --client_snd_port=1003 --server_rcv_port=2000
+//
+//	# Specify parameters to Pingtest. Run --help to see more.
+//	./client --run_search_only=true --start_size=150 --increase_factor=3
+//
+//	# Randomize the UDP padding to mitigate caching.
+//	./client --randomize=true
+//
+//  # View all flags and explanations.
+//	./client --help
 package main
 
 import (
@@ -19,12 +37,10 @@ import (
 )
 
 var (
-	clientIP           = flag.String("client_ip", "127.0.0.1", "The IP address of the sending client.")
 	serverIP           = flag.String("server_ip", "127.0.0.1", "The IP address of the ack server.")
 	clientRcvPort      = flag.Int("client_rcv_port", 3141, "The client's port that listens for ACKs")
 	clientSndPort      = flag.Int("client_snd_port", 3142, "The client's port that sends large packets.")
 	serverRcvPort      = flag.Int("server_rcv_port", 3143, "The server's port that listens for packets.")
-	serverSndPort      = flag.Int("server_snd_port", 3144, "The server's port that sends ACKS.")
 	randomize          = flag.Bool("randomize", true, "Randomize the UDP packet padding.")
 	runExpIncrease     = flag.Bool("run_exp_increase", true, "Run the exponential increase phase 1 beginning.")
 	runSearchOnly      = flag.Bool("run_search_only", false, "Run binary search only.")
@@ -32,7 +48,7 @@ var (
 	decreaseFactor     = flag.Int("decrease_factor", 2, "Decrease factor during binary search.")
 	startSize          = flag.Int("start_size", 30, "The size of the smallest packet, in bytes.")
 	maxSize            = flag.Int("max_size", 64000, "The size of the largest packet, in bytes.")
-	phaseOneNumPackets = flag.Int("phase_one_num_packets", 3, "The number of packets to send during the exponential increase phase.")
+	phaseOneNumPackets = flag.Int("phase_one_num_packets", 10, "The number of packets to send during the exponential increase phase.")
 	phaseTwoNumPackets = flag.Int("phase_two_num_packets", 10, "The number of packets to send during the binary search phase.")
 	lossRate           = flag.Int("loss_rate", 70, "The acceptible rate of packets to receive before increasing the packet size.")
 	convergeSize       = flag.Int("converge_size", 200, "When the difference is packet sizes is less than converge_size, terminate the procedure.")
@@ -41,9 +57,12 @@ var (
 const (
 	// maxUDPSize is the maximum size, in bytes, of a single UDP packet.
 	maxUDPSize = 65000
+	// timeoutMultiplier determines the timeout length for each packet. The timeout length is
+	// determined by timeoutMultiplier * max(delay of smallest ping size)
+	timeoutMultiplier = 5000
 )
 
-// Client holds parameters to run a ping test.
+// Client holds meta-parameters to run Pingtest.
 type Client struct {
 	// The host ip to ping.
 	IP             string
@@ -52,7 +71,7 @@ type Client struct {
 	RunSearchOnly  bool
 }
 
-// Params holds parameters for the ping test.
+// Params holds parameters for Pingtest.
 type Params struct {
 	// Increase the ping packet size by IncreaseFactor on each run during phase 1.
 	IncreaseFactor int
@@ -72,7 +91,7 @@ type Params struct {
 	ConvergeSize int
 }
 
-// TestStats holds statistics for an entire speedtest.
+// TestStats holds statistics for an entire Pingtest speedtest experiment.
 type TestStats struct {
 	// TotalBytesSent is the total bytes that were *attempted* to send.
 	TotalBytesSent int
@@ -287,7 +306,7 @@ func checkDefaults(oldClient *Client) (Client, error) {
 	c := Client{IP: oldClient.IP, RunExpIncrease: oldClient.RunExpIncrease, RunSearchOnly: oldClient.RunSearchOnly,
 		Params: oldClient.Params}
 	if c.IP == "" {
-		c.IP = "216.146.46.10"
+		c.IP = "127.0.0.1"
 	}
 	if c.Params.IncreaseFactor == 0 {
 		c.Params.IncreaseFactor = 10
@@ -326,7 +345,7 @@ func bandwidth(pktSize int, minRTT float64) (float64, float64) {
 // expIncrease runs pings with exponentially increasing packet sizes. Returns the smallest packet
 // size that was dropped (ceiling), and TestStats. Assumes that startSize already works, thus the
 // first packet we send is startSize * increaseFactor bytes.
-func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor int) (int, TestStats, error) {
+func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor, timeoutLen int) (int, TestStats, error) {
 	pktSize := startSize
 	for {
 		pktSize *= increaseFactor
@@ -335,7 +354,7 @@ func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor in
 		}
 		ts.TotalBytesSent += c.Params.PhaseOneNumPackets * pktSize
 		// TODO(jvesuna): Fix timeoutLen.
-		ps, err := runPing(c.Params.PhaseOneNumPackets, pktSize, 10000)
+		ps, err := runPing(c.Params.PhaseOneNumPackets, pktSize, timeoutLen)
 		ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(pktSize))
 		if err != nil {
 			log.Fatalf("failed to ping host: %v", err)
@@ -410,21 +429,22 @@ func (c *Client) binarySearch(ts TestStats, minBytes, maxBytes, decreaseFactor i
 // phase (2).
 func (c *Client) runExpIncrease(ts TestStats) (TestStats, error) {
 	// First, find the smallest RTT.
-	// TODO(jvesuna): Add test time by taking timestamp here and at return points.
+	// TODO(jvesuna): Add test runtime by taking timestamp here and at return points.
 	// TODO(jvesuna): Find a better way of accumulating bytes, maybe in runPing?
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.StartSize
-	// TODO(jvesuna): Fix timeoutlen.
+	// Wait 10 seconds per packet initially.
 	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, 10000)
 	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.StartSize))
 	if err != nil {
-		log.Fatalf("failed to ping host: %v", err)
+		log.Println("failed to ping host")
 		return TestStats{}, err
 	}
 	// TODO(jvesuna): add some sanity checks
 	log.Printf("Initial ping results: %v", ps)
+	timeoutLen := int(math.Max(ps.max, 1)) * timeoutMultiplier
 
 	// Begin Phase 1: exponential increase.
-	pktSize, ts, err := c.expIncrease(ts, c.Params.StartSize, c.Params.MaxSize, c.Params.IncreaseFactor)
+	pktSize, ts, err := c.expIncrease(ts, c.Params.StartSize, c.Params.MaxSize, c.Params.IncreaseFactor, timeoutLen)
 	if err != nil {
 		return ts, err
 	}
@@ -459,22 +479,24 @@ func (c *Client) runExpIncrease(ts TestStats) (TestStats, error) {
 func (c *Client) runSearchOnly(ts TestStats) (TestStats, error) {
 	// First run smallest packet size.
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.StartSize
-	// TODO(jvesuna): Fix timeoutlen.
+	// Wait 10 seconds per packet initially.
 	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, 10000)
 	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.StartSize))
 	if err != nil {
-		log.Fatalf("failed to ping host: %v", err)
+		log.Println("failed to ping host: %v", err)
 		return TestStats{}, err
 	}
+	// TODO(jvesuna): add some sanity checks
+	timeoutLen := int(math.Max(ps.max, 1)) * timeoutMultiplier
 	// Then run largest packet size.
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.MaxSize
-	// TODO(jvesuna): Fix timeoutLen.
-	ps, err = runPing(c.Params.PhaseOneNumPackets, c.Params.MaxSize, 10000)
+	ps, err = runPing(c.Params.PhaseOneNumPackets, c.Params.MaxSize, timeoutLen)
 	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.MaxSize))
 	if err != nil {
 		log.Fatalf("failed to ping host: %v", err)
 		return TestStats{}, err
 	}
+
 	if ps.loss < float64(c.Params.LossRate) {
 		// Pingtest passed. Need to run more tests.
 		log.Printf("Completed Ping Test")
@@ -497,6 +519,7 @@ func (c *Client) runSearchOnly(ts TestStats) (TestStats, error) {
 }
 
 // RunPingtest runs binary search to find the largest ping packet size without a high drop rate.
+// Option to run an exponential increase phase first.
 // Returns the test statistics for this test.
 func (c *Client) RunPingtest() (TestStats, error) {
 	// First, make sure parameters are correct.
@@ -507,6 +530,8 @@ func (c *Client) RunPingtest() (TestStats, error) {
 	// ts holds the overall statistics for this test.
 	var ts TestStats
 
+	// TODO(jvesuna): Have these functions take a range to probe for, and return a range. Then clean
+	// up.
 	if cl.RunExpIncrease {
 		return cl.runExpIncrease(ts)
 	} else if cl.RunSearchOnly {
@@ -516,15 +541,7 @@ func (c *Client) RunPingtest() (TestStats, error) {
 }
 
 func main() {
-	//message := &ptpb.PingtestMessage{
-	//PingtestParams: &ptpb.PingtestParams{
-	//PacketIndex:         proto.Int64(int64(1)),
-	//ClientTimestampNano: proto.Int64(time.Now().UnixNano()),
-	//PacketSizeBytes:     proto.Int64(int64(1)),
-	//},
-	//}
-	//startSize := proto.Size(message)
-
+	flag.Parse()
 	c := Client{
 		IP: *serverIP,
 		Params: Params{
@@ -537,11 +554,13 @@ func main() {
 			LossRate:           *lossRate,
 			ConvergeSize:       *convergeSize,
 		},
-		RunExpIncrease: true,
+		RunExpIncrease: *runExpIncrease,
+		RunSearchOnly:  *runSearchOnly,
 	}
 	ts, err := c.RunPingtest()
 	if err != nil {
 		log.Println(err)
+	} else {
+		log.Printf("Estimated bandwidth: %f MBps, %f Kbps", ts.EstimatedMB, ts.EstimatedKb)
 	}
-	log.Printf("Estimated bandwidth: %f MBps, %f Kbps", ts.EstimatedMB, ts.EstimatedKb)
 }

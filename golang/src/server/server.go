@@ -1,14 +1,16 @@
 // Package server implements a simple UDP server that ACKs every valid packet it receives.
-//
-// Example usage from pingtest/bin/
+// Example usage from golang/bin/
 //  # Runs a basic server *locally* that returns each valid UDP packet received.
 //	./server
 //
-//	# Assert ports to receive and send on and to.
+//	# Specify ports to receive and send on and to.
 //	./server --client_ip=192.168.2.3 --client_rcv_port=1234 --server_rcv_port=2000 --server_snd_port=2001
 //
 //	# ACKs will not contain the padding and thus be consistently small.:w
 //	./server --tiny_ack=true
+//
+//  # View all flags and explanations.
+//	./server --help
 package main
 
 import (
