@@ -5,6 +5,9 @@
 /*
 Package ptprotos is a generated protocol buffer package.
 
+Run `protoc --go_out=. ptprotos/*.proto` to generate *.pb.go file.
+See instructions at https://github.com/golang/protobuf
+
 It is generated from these files:
 	ptprotos/ptprotos.proto
 
@@ -15,10 +18,12 @@ It has these top-level messages:
 package ptprotos
 
 import proto "github.com/golang/protobuf/proto"
+import fmt "fmt"
 import math "math"
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
+var _ = fmt.Errorf
 var _ = math.Inf
 
 // The direction of the pingtest.
@@ -66,9 +71,15 @@ type PingtestParams struct {
 	// The index of the current packet that the client sends.
 	// This field is 0 indexed.
 	PacketIndex *int64 `protobuf:"varint,1,opt,name=packet_index" json:"packet_index,omitempty"`
+	// This field holds the client's timestamp of when the client sent this
+	// packet, in the number of nanoseconds elapsed since January 1, 1970 UTC.
+	ClientTimestampNano *int64 `protobuf:"varint,2,opt,name=client_timestamp_nano" json:"client_timestamp_nano,omitempty"`
+	// This field holds the server's timestamp of when the server received this
+	// packet, in the number of nanoseconds elapsed since January 1, 1970 UTC.
+	ServerTimestampNano *int64 `protobuf:"varint,3,opt,name=server_timestamp_nano" json:"server_timestamp_nano,omitempty"`
 	// The size of the packet, in bytes, that the client sends the server. This
 	// includes padding.
-	PacketSizeBytes  *int64 `protobuf:"varint,2,opt,name=packet_size_bytes" json:"packet_size_bytes,omitempty"`
+	PacketSizeBytes  *int64 `protobuf:"varint,4,opt,name=packet_size_bytes" json:"packet_size_bytes,omitempty"`
 	XXX_unrecognized []byte `json:"-"`
 }
 
@@ -79,6 +90,20 @@ func (*PingtestParams) ProtoMessage()    {}
 func (m *PingtestParams) GetPacketIndex() int64 {
 	if m != nil && m.PacketIndex != nil {
 		return *m.PacketIndex
+	}
+	return 0
+}
+
+func (m *PingtestParams) GetClientTimestampNano() int64 {
+	if m != nil && m.ClientTimestampNano != nil {
+		return *m.ClientTimestampNano
+	}
+	return 0
+}
+
+func (m *PingtestParams) GetServerTimestampNano() int64 {
+	if m != nil && m.ServerTimestampNano != nil {
+		return *m.ServerTimestampNano
 	}
 	return 0
 }
