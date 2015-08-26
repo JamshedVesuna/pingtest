@@ -22,6 +22,7 @@ var (
 	clientSndPort = flag.Int("client_snd_port", 3142, "The client's port that sends large packets.")
 	serverRcvPort = flag.Int("server_rcv_port", 3143, "The server's port that listens for packets.")
 	serverSndPort = flag.Int("server_snd_port", 3144, "The server's port that sends ACKS.")
+	randomize     = flag.Bool("randomize", true, "Randomize the UDP packet padding.")
 )
 
 // checkError just logs the error.
@@ -64,15 +65,17 @@ func ackServer() {
 
 	for {
 		// TODO(jvesuna): This buff should be > 65,000 bytes.
-		buf := make([]byte, 200)
-		if _, _, err := ServerConn.ReadFromUDP(buf); err != nil {
+		buf := make([]byte, 65000)
+		numBytesRead, _, err := ServerConn.ReadFromUDP(buf)
+		log.Println("Got packet")
+		if err != nil {
 			log.Println("Error: ", err)
 		}
 		// ACKS do not need to be ordered, so we do not need to lock.
 		// TODO(jvesuna): Ensure goroutine closes.
 		serverWG.Add(1)
 		// TODO(jvesuna): Make this a goroutine.
-		parseAndAck(buf)
+		parseAndAck(buf[:numBytesRead])
 	}
 	serverWG.Wait()
 }
@@ -86,19 +89,21 @@ func parseAndAck(buf []byte) {
 	message := &ptpb.PingtestMessage{}
 	if err := proto.Unmarshal(buf, message); err != nil {
 		//TODO(jvesuna): Fix this error handling.
-		//fmt.Println(message)
-		//log.Println("Failed to unmarshal in parseAndAck:", err)
-		log.Println("fix this")
+		log.Println("FIX: Failed to unmarshal in parseAndAck:", err)
 	}
+
+	// TODO(jvesuna): Uncomment the following 3 blocks to send tiny ACKS.
 	//log.Println("Received ", message)
-	paramsReceived := message.PingtestParams
+	//paramsReceived := message.PingtestParams
 
-	messageAck := &ptpb.PingtestMessage{
-		PingtestParams: paramsReceived,
-	}
+	//messageAck := &ptpb.PingtestMessage{
+	//PingtestParams: paramsReceived,
+	//}
 
-	// wireBytesAck should always be about the same size.
-	wireBytesAck, err := proto.Marshal(messageAck)
+	// wireBytesAck should always be about the same size. For now, we are testing sending the full
+	// payload back.
+	//wireBytesAck, err := proto.Marshal(messageAck)
+	wireBytesAck, err := proto.Marshal(message)
 	checkError(err)
 
 	// Prepare to send ACK
@@ -112,11 +117,14 @@ func parseAndAck(buf []byte) {
 	defer Conn.Close()
 
 	// Send ACK.
+
+	Conn.SetWriteBuffer(proto.Size(message))
 	_, err = Conn.Write(wireBytesAck)
 	if err != nil {
 		//TODO(jvesuna): Fix.
 		log.Fatal("Failed to send ACK:", err)
 	}
+	log.Println("Sent Ack")
 }
 
 func main() {
