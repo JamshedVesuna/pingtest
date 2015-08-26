@@ -5,8 +5,9 @@
 /*
 Package ptprotos is a generated protocol buffer package.
 
-Run `protoc --go_out=. ptprotos/*.proto` to generate *.pb.go file.
-See instructions at https://github.com/golang/protobuf
+Package ptprotos implements a protobuf for sending UDP packets on the wire.
+Run `protoc --go_out=. ptprotos/*.proto` from src/ to generate *.pb.go file.
+See instructions at https://github.com/golang/protobuf.
 
 It is generated from these files:
 	ptprotos/ptprotos.proto
