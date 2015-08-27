@@ -60,6 +60,10 @@ const (
 	// timeoutMultiplier determines the timeout length for each packet. The timeout length is
 	// determined by timeoutMultiplier * max(delay of smallest ping size)
 	timeoutMultiplier = 5000
+	// initialProbeTimeout is the default time to wait for each of the initial packets sent out to
+	// determine the average delay.
+	// TODO(jvesuna): Change this constant to something smarter.
+	initialProbeTimeout = 10000
 )
 
 // Client holds meta-parameters to run Pingtest.
@@ -126,14 +130,6 @@ func (s BySentIndex) Len() int           { return len(s) }
 func (s BySentIndex) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s BySentIndex) Less(i, j int) bool { return s[i].sentIndex < s[j].sentIndex }
 
-// checkError just logs the error.
-//TODO(jvesuna): Remove this function with better error handling.
-func checkError(err error) {
-	if err != nil {
-		log.Println("Error: ", err)
-	}
-}
-
 // computeDelays returns the min, mean, and max delays of a sorted list of packets and received
 // times.
 func computeDelays(rcvPackets []receivedPacket, rcvTimes []int64) (float64, float64, float64, error) {
@@ -164,14 +160,17 @@ func computeDelays(rcvPackets []receivedPacket, rcvTimes []int64) (float64, floa
 
 // clientReceiver receives ping ACKs from the server and returns ping statistics.
 // timeoutLen is the duration to wait for each packet in Milliseconds.
-// Note that the returned error is discarded in the goroutine.
-func (ps *pingStats) clientReceiver(count, timeoutLen int) error {
+func (ps *pingStats) clientReceiver(count, timeoutLen int) {
 	// TODO(jvesuna): Extract server into submethod w/ error checking.
 	// Bind to a local port and address.
 	ServerAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+strconv.Itoa(*clientRcvPort))
-	checkError(err)
+	if err != nil {
+		log.Fatalln("error binding to local port:", err)
+	}
 	ServerConn, err := net.ListenUDP("udp", ServerAddr)
-	checkError(err)
+	if err != nil {
+		log.Fatalln("error listening for UDP:", err)
+	}
 	defer ServerConn.Close()
 
 	var rcvCount int
@@ -186,10 +185,10 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int) error {
 		if err != nil {
 			// Handle timeout.
 			if reflect.TypeOf(err) == reflect.TypeOf((*net.OpError)(nil)) {
-				log.Printf("Timeout!")
+				log.Println("Timeout!")
 			} else {
 				// TODO(jvesuna): Handle.
-				log.Printf("Error: ", err)
+				log.Fatalln("Error: ", err)
 			}
 		} else {
 			// Packet received.
@@ -199,9 +198,7 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int) error {
 			rcvCount++
 			message := &ptpb.PingtestMessage{}
 			if err := proto.Unmarshal(buf, message); err != nil {
-				// TODO(jvesuna): Fix this error handling.
-				log.Println(err)
-				log.Println("fix this, error reading proto from packet")
+				log.Fatalln("error reading proto from packet:", err)
 			}
 			sentIndex := *message.PingtestParams.PacketIndex
 			rcvPackets = append(rcvPackets, receivedPacket{
@@ -219,8 +216,7 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int) error {
 	percentLoss := 100 - (float64(rcvCount)/float64(count))*100
 	minDelay, meanDelay, maxDelay, err := computeDelays(rcvPackets, rcvTimes)
 	if err != nil {
-		// TODO(jvesuna): Fix this error handling!
-		log.Println(err)
+		log.Fatalln("error computing delay:", err)
 	}
 
 	ps.min = minDelay
@@ -229,7 +225,6 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int) error {
 	ps.loss = percentLoss
 	log.Println("PingStats:", *ps)
 	defer ps.wg.Done()
-	return nil
 }
 
 // runPing runs a UDP implementation of the ping util.
@@ -250,17 +245,20 @@ func runPing(count, size, timeoutLen int) (pingStats, error) {
 	// TODO(jvesuna): Fix port binding.
 	// Bind to a local port and address.
 	clientSenderAddr, err := net.ResolveUDPAddr("udp", *serverIP+":"+strconv.Itoa(*serverRcvPort))
-	checkError(err)
-
+	if err != nil {
+		log.Fatalln("error binding to server port:", err)
+	}
 	//TODO(jvesuna): Create the connection to send on.
 	LocalAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+strconv.Itoa(*clientSndPort))
-	checkError(err)
+	if err != nil {
+		log.Fatalln("error binding to local port:", err)
+	}
 	Conn, err := net.DialUDP("udp", LocalAddr, clientSenderAddr)
-	checkError(err)
+	if err != nil {
+		log.Fatalln("error connecting UDP:", err)
+	}
 
 	defer Conn.Close()
-	log.Printf("Client sender beginning to send...")
-
 	for i := 0; i < count; i++ {
 		params := &ptpb.PingtestParams{
 			PacketIndex:         proto.Int64(int64(i)),
@@ -284,12 +282,19 @@ func runPing(count, size, timeoutLen int) (pingStats, error) {
 		}
 
 		wireBytes, err := proto.Marshal(message)
-		checkError(err)
+		if err != nil {
+			log.Println(err)
+			return pingStats{}, errors.New("error marshalling message")
+		}
+
 		// Send the packet.
-		// TODO(jvesuna):  Handle host down and network problems.
+		// TODO(jvesuna):  Handle 'host down' and network problems.
 		Conn.SetWriteBuffer(proto.Size(message))
-		_, err = Conn.Write(wireBytes)
-		checkError(err)
+		if _, err = Conn.Write(wireBytes); err != nil {
+			log.Println(err)
+			return pingStats{}, errors.New("error writing wireBytes to connection")
+		}
+		// TODO(jvesuna): Change this delay between packets?
 		time.Sleep(1 * time.Second)
 	}
 
@@ -389,7 +394,7 @@ func (c *Client) binarySearch(ts TestStats, minBytes, maxBytes, decreaseFactor i
 	for {
 		ts.TotalBytesSent += c.Params.PhaseTwoNumPackets * middleGround
 		// TODO(jvesuna): Fix timeoutLen.
-		ps, err := runPing(c.Params.PhaseTwoNumPackets, middleGround, 10000)
+		ps, err := runPing(c.Params.PhaseTwoNumPackets, middleGround, initialProbeTimeout)
 		ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseTwoNumPackets) * float64(middleGround))
 		if err != nil {
 			log.Fatalf("failed to ping host: %v", err)
@@ -433,7 +438,7 @@ func (c *Client) runExpIncrease(ts TestStats) (TestStats, error) {
 	// TODO(jvesuna): Find a better way of accumulating bytes, maybe in runPing?
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.StartSize
 	// Wait 10 seconds per packet initially.
-	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, 10000)
+	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, initialProbeTimeout)
 	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.StartSize))
 	if err != nil {
 		log.Println("failed to ping host")
@@ -480,7 +485,7 @@ func (c *Client) runSearchOnly(ts TestStats) (TestStats, error) {
 	// First run smallest packet size.
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.StartSize
 	// Wait 10 seconds per packet initially.
-	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, 10000)
+	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, initialProbeTimeout)
 	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.StartSize))
 	if err != nil {
 		log.Println("failed to ping host: %v", err)
