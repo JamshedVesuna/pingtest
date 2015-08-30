@@ -163,7 +163,7 @@ func computeDelays(rcvPackets []receivedPacket, rcvTimes []int64) (float64, floa
 func (ps *pingStats) clientReceiver(count, timeoutLen int) {
 	// TODO(jvesuna): Extract server into submethod w/ error checking.
 	// Bind to a local port and address.
-	ServerAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+strconv.Itoa(*clientRcvPort))
+	ServerAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(*clientRcvPort))
 	if err != nil {
 		log.Fatalln("error binding to local port:", err)
 	}
