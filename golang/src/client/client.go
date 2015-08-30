@@ -486,7 +486,7 @@ func (c *Client) runSearchOnly(ts TestStats) (TestStats, error) {
 		return TestStats{}, err
 	}
 	// TODO(jvesuna): add some sanity checks
-	timeoutLen := int(math.Max(ps.max, 1)) * timeoutMultiplier
+	timeoutLen := int(math.Min(ps.max, 1)) * timeoutMultiplier
 	// Then run largest packet size.
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.MaxSize
 	ps, err = runPing(c.Params.PhaseOneNumPackets, c.Params.MaxSize, timeoutLen)
