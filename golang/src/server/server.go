@@ -110,12 +110,7 @@ func parseAndAck(buf []byte) {
 	if err != nil {
 		log.Fatalln("error binding to client address and port:", err)
 	}
-	// TODO(jvesuna): Fix port binding.
-	LocalAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(*serverSndPort))
-	if err != nil {
-		log.Fatalln("error binding to local port:", err)
-	}
-	Conn, err := net.DialUDP("udp", LocalAddr, serverSenderAddr)
+	Conn, err := net.DialUDP("udp", nil, serverSenderAddr)
 	if err != nil {
 		log.Fatalln("error making connection to client:", err)
 	}
