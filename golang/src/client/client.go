@@ -194,7 +194,7 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int) {
 			// Packet received.
 			// TODO(jvesuna): Handle in goroutine with a shared struct.
 			buf = buf[:numBytesRead]
-			log.Println("Received packet")
+			log.Println("Received packet #", i)
 			rcvCount++
 			message := &ptpb.PingtestMessage{}
 			if err := proto.Unmarshal(buf, message); err != nil {
@@ -207,7 +207,6 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int) {
 			})
 			rcvTimes = append(rcvTimes, time.Now().UnixNano())
 		}
-		i++
 	}
 
 	// Process packets.
@@ -248,12 +247,7 @@ func runPing(count, size, timeoutLen int) (pingStats, error) {
 	if err != nil {
 		log.Fatalln("error binding to server port:", err)
 	}
-	//TODO(jvesuna): Create the connection to send on.
-	LocalAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+strconv.Itoa(*clientSndPort))
-	if err != nil {
-		log.Fatalln("error binding to local port:", err)
-	}
-	Conn, err := net.DialUDP("udp", LocalAddr, clientSenderAddr)
+	Conn, err := net.DialUDP("udp", nil, clientSenderAddr)
 	if err != nil {
 		log.Fatalln("error connecting UDP:", err)
 	}
