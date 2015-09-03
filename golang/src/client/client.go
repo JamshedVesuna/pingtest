@@ -131,7 +131,7 @@ func (s BySentIndex) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 func (s BySentIndex) Less(i, j int) bool { return s[i].sentIndex < s[j].sentIndex }
 
 // computeDelays returns the min, mean, and max delays of a sorted list of packets and received
-// times.
+// times in milliseconds.
 func computeDelays(rcvPackets []receivedPacket, rcvTimes []int64) (float64, float64, float64, error) {
 	if len(rcvPackets) != len(rcvTimes) {
 		return 0, 0, 0, errors.New("error: length of rcvPackets != length of rcvTimes")
@@ -160,18 +160,19 @@ func computeDelays(rcvPackets []receivedPacket, rcvTimes []int64) (float64, floa
 
 // clientReceiver receives ping ACKs from the server and returns ping statistics.
 // timeoutLen is the duration to wait for each packet in Milliseconds.
-func (ps *pingStats) clientReceiver(count, timeoutLen int) {
+func (ps *pingStats) clientReceiver(count, timeoutLen int, ServerConn *net.UDPConn) {
 	// TODO(jvesuna): Extract server into submethod w/ error checking.
 	// Bind to a local port and address.
-	ServerAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(*clientRcvPort))
-	if err != nil {
-		log.Fatalln("error binding to local port:", err)
-	}
-	ServerConn, err := net.ListenUDP("udp", ServerAddr)
-	if err != nil {
-		log.Fatalln("error listening for UDP:", err)
-	}
-	defer ServerConn.Close()
+	//ServerAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(*clientRcvPort))
+	//if err != nil {
+	//log.Fatalln("error binding to local port:", err)
+	//}
+	//ServerConn, err := net.ListenUDP("udp", ServerAddr)
+	//if err != nil {
+	//log.Fatalln("error listening for UDP:", err)
+	//}
+	log.Println("Conn is", ServerConn)
+	//defer ServerConn.Close()
 
 	var rcvCount int
 	var rcvPackets []receivedPacket
@@ -222,7 +223,10 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int) {
 	ps.mean = meanDelay
 	ps.max = maxDelay
 	ps.loss = percentLoss
-	log.Println("PingStats:", *ps)
+	log.Println("Min Delay:", ps.min)
+	log.Println("Max Delay:", ps.max)
+	log.Println("Mean Delay:", ps.mean)
+	log.Println("Loss Percent:", ps.loss)
 	defer ps.wg.Done()
 }
 
@@ -230,29 +234,33 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int) {
 // count is the number of UDP packets to send.
 // size is in bytes.
 // timeoutLen is in milliseconds.
-func runPing(count, size, timeoutLen int) (pingStats, error) {
+func runPing(count, size, timeoutLen int, Conn *net.UDPConn) (pingStats, error) {
 	log.Printf("========= starting new ping =========")
 	log.Println("Using byte size: ", size)
 
 	// Startup receiver.
 	var ps pingStats
 	ps.wg.Add(1)
-	go ps.clientReceiver(count, timeoutLen)
+	go ps.clientReceiver(count, timeoutLen, Conn)
 
 	// Send packets
 
 	// TODO(jvesuna): Fix port binding.
 	// Bind to a local port and address.
-	clientSenderAddr, err := net.ResolveUDPAddr("udp", *serverIP+":"+strconv.Itoa(*serverRcvPort))
-	if err != nil {
-		log.Fatalln("error binding to server port:", err)
-	}
-	Conn, err := net.DialUDP("udp", nil, clientSenderAddr)
-	if err != nil {
-		log.Fatalln("error connecting UDP:", err)
-	}
+	//clientSenderAddr, err := net.ResolveUDPAddr("udp", *serverIP+":"+strconv.Itoa(*serverRcvPort))
+	//if err != nil {
+	//log.Fatalln("error binding to server port:", err)
+	//}
+	//Conn, err := net.DialUDP("udp", nil, clientSenderAddr)
+	//if err != nil {
+	//log.Fatalln("error connecting UDP:", err)
+	//}
 
-	defer Conn.Close()
+	log.Println("sending Conn is", Conn)
+	//defer Conn.Close()
+
+	// Add Channel here
+
 	for i := 0; i < count; i++ {
 		params := &ptpb.PingtestParams{
 			PacketIndex:         proto.Int64(int64(i)),
@@ -289,6 +297,7 @@ func runPing(count, size, timeoutLen int) (pingStats, error) {
 			return pingStats{}, errors.New("error writing wireBytes to connection")
 		}
 		// TODO(jvesuna): Change this delay between packets?
+		log.Println("Sent #", i)
 		time.Sleep(1 * time.Second)
 	}
 
@@ -344,7 +353,7 @@ func bandwidth(pktSize int, minRTT float64) (float64, float64) {
 // expIncrease runs pings with exponentially increasing packet sizes. Returns the smallest packet
 // size that was dropped (ceiling), and TestStats. Assumes that startSize already works, thus the
 // first packet we send is startSize * increaseFactor bytes.
-func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor, timeoutLen int) (int, TestStats, error) {
+func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor, timeoutLen int, Conn *net.UDPConn) (int, TestStats, error) {
 	pktSize := startSize
 	for {
 		pktSize *= increaseFactor
@@ -353,7 +362,7 @@ func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor, t
 		}
 		ts.TotalBytesSent += c.Params.PhaseOneNumPackets * pktSize
 		// TODO(jvesuna): Fix timeoutLen.
-		ps, err := runPing(c.Params.PhaseOneNumPackets, pktSize, timeoutLen)
+		ps, err := runPing(c.Params.PhaseOneNumPackets, pktSize, timeoutLen, Conn)
 		ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(pktSize))
 		if err != nil {
 			log.Fatalf("failed to ping host: %v", err)
@@ -379,7 +388,7 @@ func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor, t
 
 // binarySearch returns the largest packet size that has a loss rate < c.Params.LossRate, and
 // TestStats. Assume that minBytes works and maxBytes is dropped.
-func (c *Client) binarySearch(ts TestStats, minBytes, maxBytes, decreaseFactor int) (int, TestStats, error) {
+func (c *Client) binarySearch(ts TestStats, minBytes, maxBytes, decreaseFactor int, Conn *net.UDPConn) (int, TestStats, error) {
 	log.Printf("Testing range %d to %d bytes sized packets.\n", minBytes, maxBytes)
 	// middleGround is always the average of minBytes and maxBytes.
 	middleGround := int(float64(maxBytes+minBytes) / float64(c.Params.DecreaseFactor))
@@ -388,7 +397,7 @@ func (c *Client) binarySearch(ts TestStats, minBytes, maxBytes, decreaseFactor i
 	for {
 		ts.TotalBytesSent += c.Params.PhaseTwoNumPackets * middleGround
 		// TODO(jvesuna): Fix timeoutLen.
-		ps, err := runPing(c.Params.PhaseTwoNumPackets, middleGround, initialProbeTimeout)
+		ps, err := runPing(c.Params.PhaseTwoNumPackets, middleGround, initialProbeTimeout, Conn)
 		ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseTwoNumPackets) * float64(middleGround))
 		if err != nil {
 			log.Fatalf("failed to ping host: %v", err)
@@ -426,13 +435,13 @@ func (c *Client) binarySearch(ts TestStats, minBytes, maxBytes, decreaseFactor i
 
 // runExpIncrease first runs an exponentially increasing byte size phase (1), then a binary search
 // phase (2).
-func (c *Client) runExpIncrease(ts TestStats) (TestStats, error) {
+func (c *Client) runExpIncrease(ts TestStats, Conn *net.UDPConn) (TestStats, error) {
 	// First, find the smallest RTT.
 	// TODO(jvesuna): Add test runtime by taking timestamp here and at return points.
 	// TODO(jvesuna): Find a better way of accumulating bytes, maybe in runPing?
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.StartSize
 	// Wait 10 seconds per packet initially.
-	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, initialProbeTimeout)
+	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, initialProbeTimeout, Conn)
 	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.StartSize))
 	if err != nil {
 		log.Println("failed to ping host")
@@ -440,10 +449,10 @@ func (c *Client) runExpIncrease(ts TestStats) (TestStats, error) {
 	}
 	// TODO(jvesuna): add some sanity checks
 	log.Printf("Initial ping results: %v", ps)
-	timeoutLen := int(math.Max(ps.max, 1)) * timeoutMultiplier
+	timeoutLen := int(math.Min(ps.max, 1)) * timeoutMultiplier
 
 	// Begin Phase 1: exponential increase.
-	pktSize, ts, err := c.expIncrease(ts, c.Params.StartSize, c.Params.MaxSize, c.Params.IncreaseFactor, timeoutLen)
+	pktSize, ts, err := c.expIncrease(ts, c.Params.StartSize, c.Params.MaxSize, c.Params.IncreaseFactor, timeoutLen, Conn)
 	if err != nil {
 		return ts, err
 	}
@@ -462,7 +471,7 @@ func (c *Client) runExpIncrease(ts TestStats) (TestStats, error) {
 	minBytes := pktSize / c.Params.IncreaseFactor
 
 	// Start Phase 2: binary search.
-	pktSize, ts, err = c.binarySearch(ts, minBytes, maxBytes, c.Params.DecreaseFactor)
+	pktSize, ts, err = c.binarySearch(ts, minBytes, maxBytes, c.Params.DecreaseFactor, Conn)
 	if err != nil {
 		return ts, err
 	}
@@ -475,11 +484,11 @@ func (c *Client) runExpIncrease(ts TestStats) (TestStats, error) {
 }
 
 // runSearchOnly only runs binary search on the given parameters.
-func (c *Client) runSearchOnly(ts TestStats) (TestStats, error) {
+func (c *Client) runSearchOnly(ts TestStats, Conn *net.UDPConn) (TestStats, error) {
 	// First run smallest packet size.
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.StartSize
 	// Wait 10 seconds per packet initially.
-	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, initialProbeTimeout)
+	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, initialProbeTimeout, Conn)
 	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.StartSize))
 	if err != nil {
 		log.Println("failed to ping host: %v", err)
@@ -489,7 +498,7 @@ func (c *Client) runSearchOnly(ts TestStats) (TestStats, error) {
 	timeoutLen := int(math.Min(ps.max, 1)) * timeoutMultiplier
 	// Then run largest packet size.
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.MaxSize
-	ps, err = runPing(c.Params.PhaseOneNumPackets, c.Params.MaxSize, timeoutLen)
+	ps, err = runPing(c.Params.PhaseOneNumPackets, c.Params.MaxSize, timeoutLen, Conn)
 	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.MaxSize))
 	if err != nil {
 		log.Fatalf("failed to ping host: %v", err)
@@ -507,7 +516,7 @@ func (c *Client) runSearchOnly(ts TestStats) (TestStats, error) {
 		return ts, nil
 	}
 	// Else if largest packet size fails, then run binary search.
-	pktSize, ts, err := c.binarySearch(ts, c.Params.StartSize, c.Params.MaxSize, c.Params.DecreaseFactor)
+	pktSize, ts, err := c.binarySearch(ts, c.Params.StartSize, c.Params.MaxSize, c.Params.DecreaseFactor, Conn)
 	if err != nil {
 		return ts, err
 	}
@@ -520,7 +529,7 @@ func (c *Client) runSearchOnly(ts TestStats) (TestStats, error) {
 // RunPingtest runs binary search to find the largest ping packet size without a high drop rate.
 // Option to run an exponential increase phase first.
 // Returns the test statistics for this test.
-func (c *Client) RunPingtest() (TestStats, error) {
+func (c *Client) RunPingtest(Conn *net.UDPConn) (TestStats, error) {
 	// First, make sure parameters are correct.
 	cl, err := checkDefaults(c)
 	if err != nil {
@@ -532,15 +541,34 @@ func (c *Client) RunPingtest() (TestStats, error) {
 	// TODO(jvesuna): Have these functions take a range to probe for, and return a range. Then clean
 	// up.
 	if cl.RunExpIncrease {
-		return cl.runExpIncrease(ts)
+		return cl.runExpIncrease(ts, Conn)
 	} else if cl.RunSearchOnly {
-		return cl.runSearchOnly(ts)
+		return cl.runSearchOnly(ts, Conn)
 	}
 	return TestStats{}, errors.New("pingtest failed: ended unexpectedly")
 }
 
 func main() {
 	flag.Parse()
+	//ServerAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(*clientRcvPort))
+	//if err != nil {
+	//log.Fatalln("error binding to local port:", err)
+	//}
+	//ServerConn, err := net.ListenUDP("udp", ServerAddr)
+	//if err != nil {
+	//log.Fatalln("error listening for UDP:", err)
+	//}
+
+	clientSenderAddr, err := net.ResolveUDPAddr("udp", *serverIP+":"+strconv.Itoa(*serverRcvPort))
+	if err != nil {
+		log.Fatalln("error binding to server port:", err)
+	}
+	Conn, err := net.DialUDP("udp", nil, clientSenderAddr)
+	if err != nil {
+		log.Fatalln("error connecting UDP:", err)
+	}
+	defer Conn.Close()
+
 	c := Client{
 		IP: *serverIP,
 		Params: Params{
@@ -556,7 +584,7 @@ func main() {
 		RunExpIncrease: *runExpIncrease,
 		RunSearchOnly:  *runSearchOnly,
 	}
-	ts, err := c.RunPingtest()
+	ts, err := c.RunPingtest(Conn)
 	if err != nil {
 		log.Println(err)
 	} else {

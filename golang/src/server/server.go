@@ -21,6 +21,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	ptpb "ptprotos"
@@ -70,12 +71,13 @@ func ackServer() {
 	var serverWG sync.WaitGroup
 	for {
 		buf := make([]byte, maxUDPSize)
-		numBytesRead, _, err := ServerConn.ReadFromUDP(buf)
+		numBytesRead, clientUDPAddr, err := ServerConn.ReadFromUDP(buf)
+		log.Println(clientUDPAddr)
 		if err != nil {
 			log.Println("error receiving packet: ", err)
 		}
 		serverWG.Add(1)
-		go parseAndAck(buf[:numBytesRead])
+		go parseAndAck(buf[:numBytesRead], ServerConn, clientUDPAddr)
 	}
 	serverWG.Wait()
 }
@@ -83,7 +85,7 @@ func ackServer() {
 // parseAndAck parses the UDP payload and sends anwACK to the client receiver.
 // TODO(jvesuna): Keep parseAndAck routine live with a connection. Have the ackServer channel data
 // to this routine for faster processing.
-func parseAndAck(buf []byte) {
+func parseAndAck(buf []byte, ServerConn *net.UDPConn, clientUDPAddr *net.UDPAddr) {
 	messageAck := &ptpb.PingtestMessage{}
 	if err := proto.Unmarshal(buf, messageAck); err != nil {
 		//TODO(jvesuna): Fix this error handling.
@@ -106,19 +108,23 @@ func parseAndAck(buf []byte) {
 
 	// Bind all addresses and ports.
 	// TODO(jvesuna): Fix addressing, use flags.
-	serverSenderAddr, err := net.ResolveUDPAddr("udp", *clientIP+":"+strconv.Itoa(*clientRcvPort))
-	if err != nil {
-		log.Fatalln("error binding to client address and port:", err)
-	}
-	Conn, err := net.DialUDP("udp", nil, serverSenderAddr)
-	if err != nil {
-		log.Fatalln("error making connection to client:", err)
-	}
-	defer Conn.Close()
+	//serverSenderAddr := clientUDPAddr
+	//serverSenderAddr, err := net.ResolveUDPAddr("udp", *clientIP+":"+strconv.Itoa(*clientRcvPort))
+	//if err != nil {
+	//log.Fatalln("error binding to client address and port:", err)
+	//}
+	//Conn, err := net.DialUDP("udp", nil, serverSenderAddr)
+	//if err != nil {
+	//log.Fatalln("error making connection to client:", err)
+	//}
+	//defer Conn.Close()
 
-	// Send ACK.
-	Conn.SetWriteBuffer(proto.Size(messageAck))
-	_, err = Conn.Write(wireBytesAck)
+	//// Send ACK.
+	time.Sleep(1 * time.Second)
+	//Conn.SetWriteBuffer(proto.Size(messageAck))
+	//_, err = Conn.Write(wireBytesAck)
+	ServerConn.SetWriteBuffer(proto.Size(messageAck))
+	_, err = ServerConn.WriteToUDP(wireBytesAck, clientUDPAddr)
 	if err != nil {
 		log.Println("Failed to send ACK:", err)
 	}
