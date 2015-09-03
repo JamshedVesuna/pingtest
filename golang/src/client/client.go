@@ -140,39 +140,34 @@ func computeDelays(rcvPackets []receivedPacket, rcvTimes []int64) (float64, floa
 		return 0, 0, 0, nil
 	}
 	var delays []int64
+	var timeDelay float64
 	for i, _ := range rcvPackets {
-		delays = append(delays, (rcvTimes[i]-*rcvPackets[i].message.PingtestParams.ClientTimestampNano)/1000000)
+		timeDelay = float64(rcvTimes[i]-*rcvPackets[i].message.PingtestParams.ClientTimestampNano) / float64(1000000)
+		delays = append(delays, int64(timeDelay))
 	}
 	sum := 0
 	min, max := delays[0], delays[0]
-	for i := 1; i < len(delays); i++ {
-		sum += int(delays[i])
-		if delays[i] < min {
-			min = delays[i]
+	//for i := 1; i < len(delays); i++ {
+	for _, delay := range delays {
+		sum += int(delay)
+		if delay < min {
+			min = delay
 		}
-		if delays[i] > max {
-			max = delays[i]
+		if delay > max {
+			max = delay
 		}
 	}
 	mean := float64(sum) / float64(len(rcvPackets))
+	if float64(min) > mean || mean > float64(max) {
+		log.Fatalln("error: mean must be within min and max")
+	}
 	return float64(min), mean, float64(max), nil
 }
 
 // clientReceiver receives ping ACKs from the server and returns ping statistics.
 // timeoutLen is the duration to wait for each packet in Milliseconds.
 func (ps *pingStats) clientReceiver(count, timeoutLen int, ServerConn *net.UDPConn) {
-	// TODO(jvesuna): Extract server into submethod w/ error checking.
-	// Bind to a local port and address.
-	//ServerAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(*clientRcvPort))
-	//if err != nil {
-	//log.Fatalln("error binding to local port:", err)
-	//}
-	//ServerConn, err := net.ListenUDP("udp", ServerAddr)
-	//if err != nil {
-	//log.Fatalln("error listening for UDP:", err)
-	//}
 	log.Println("Conn is", ServerConn)
-	//defer ServerConn.Close()
 
 	var rcvCount int
 	var rcvPackets []receivedPacket
@@ -244,22 +239,9 @@ func runPing(count, size, timeoutLen int, Conn *net.UDPConn) (pingStats, error) 
 	go ps.clientReceiver(count, timeoutLen, Conn)
 
 	// Send packets
-
-	// TODO(jvesuna): Fix port binding.
-	// Bind to a local port and address.
-	//clientSenderAddr, err := net.ResolveUDPAddr("udp", *serverIP+":"+strconv.Itoa(*serverRcvPort))
-	//if err != nil {
-	//log.Fatalln("error binding to server port:", err)
-	//}
-	//Conn, err := net.DialUDP("udp", nil, clientSenderAddr)
-	//if err != nil {
-	//log.Fatalln("error connecting UDP:", err)
-	//}
-
 	log.Println("sending Conn is", Conn)
-	//defer Conn.Close()
 
-	// Add Channel here
+	// TODO(jvesuna): Add Channel here.
 
 	for i := 0; i < count; i++ {
 		params := &ptpb.PingtestParams{
@@ -550,14 +532,6 @@ func (c *Client) RunPingtest(Conn *net.UDPConn) (TestStats, error) {
 
 func main() {
 	flag.Parse()
-	//ServerAddr, err := net.ResolveUDPAddr("udp", ":"+strconv.Itoa(*clientRcvPort))
-	//if err != nil {
-	//log.Fatalln("error binding to local port:", err)
-	//}
-	//ServerConn, err := net.ListenUDP("udp", ServerAddr)
-	//if err != nil {
-	//log.Fatalln("error listening for UDP:", err)
-	//}
 
 	clientSenderAddr, err := net.ResolveUDPAddr("udp", *serverIP+":"+strconv.Itoa(*serverRcvPort))
 	if err != nil {

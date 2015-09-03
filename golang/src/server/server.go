@@ -21,7 +21,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	ptpb "ptprotos"
@@ -106,23 +105,7 @@ func parseAndAck(buf []byte, ServerConn *net.UDPConn, clientUDPAddr *net.UDPAddr
 		fmt.Println("error marshalling ACK:", err)
 	}
 
-	// Bind all addresses and ports.
-	// TODO(jvesuna): Fix addressing, use flags.
-	//serverSenderAddr := clientUDPAddr
-	//serverSenderAddr, err := net.ResolveUDPAddr("udp", *clientIP+":"+strconv.Itoa(*clientRcvPort))
-	//if err != nil {
-	//log.Fatalln("error binding to client address and port:", err)
-	//}
-	//Conn, err := net.DialUDP("udp", nil, serverSenderAddr)
-	//if err != nil {
-	//log.Fatalln("error making connection to client:", err)
-	//}
-	//defer Conn.Close()
-
-	//// Send ACK.
-	time.Sleep(1 * time.Second)
-	//Conn.SetWriteBuffer(proto.Size(messageAck))
-	//_, err = Conn.Write(wireBytesAck)
+	// Send ACK.
 	ServerConn.SetWriteBuffer(proto.Size(messageAck))
 	_, err = ServerConn.WriteToUDP(wireBytesAck, clientUDPAddr)
 	if err != nil {
