@@ -147,7 +147,6 @@ func computeDelays(rcvPackets []receivedPacket, rcvTimes []int64) (float64, floa
 	}
 	sum := 0
 	min, max := delays[0], delays[0]
-	//for i := 1; i < len(delays); i++ {
 	for _, delay := range delays {
 		sum += int(delay)
 		if delay < min {
