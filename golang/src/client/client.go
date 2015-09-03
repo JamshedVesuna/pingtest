@@ -37,21 +37,22 @@ import (
 )
 
 var (
-	serverIP           = flag.String("server_ip", "127.0.0.1", "The IP address of the ack server.")
-	clientRcvPort      = flag.Int("client_rcv_port", 3141, "The client's port that listens for ACKs")
-	clientSndPort      = flag.Int("client_snd_port", 3142, "The client's port that sends large packets.")
-	serverRcvPort      = flag.Int("server_rcv_port", 3143, "The server's port that listens for packets.")
-	randomize          = flag.Bool("randomize", true, "Randomize the UDP packet padding.")
-	runExpIncrease     = flag.Bool("run_exp_increase", true, "Run the exponential increase phase 1 beginning.")
-	runSearchOnly      = flag.Bool("run_search_only", false, "Run binary search only.")
-	increaseFactor     = flag.Int("increase_factor", 10, "Increase factor during exponential increase.")
-	decreaseFactor     = flag.Int("decrease_factor", 2, "Decrease factor during binary search.")
-	startSize          = flag.Int("start_size", 30, "The size of the smallest packet, in bytes.")
-	maxSize            = flag.Int("max_size", 64000, "The size of the largest packet, in bytes.")
-	phaseOneNumPackets = flag.Int("phase_one_num_packets", 10, "The number of packets to send during the exponential increase phase.")
-	phaseTwoNumPackets = flag.Int("phase_two_num_packets", 10, "The number of packets to send during the binary search phase.")
-	lossRate           = flag.Int("loss_rate", 70, "The acceptible rate of packets to receive before increasing the packet size.")
-	convergeSize       = flag.Int("converge_size", 200, "When the difference is packet sizes is less than converge_size, terminate the procedure.")
+	serverIP            = flag.String("server_ip", "127.0.0.1", "The IP address of the ack server.")
+	clientRcvPort       = flag.Int("client_rcv_port", 3141, "The client's port that listens for ACKs")
+	clientSndPort       = flag.Int("client_snd_port", 3142, "The client's port that sends large packets.")
+	serverRcvPort       = flag.Int("server_rcv_port", 3143, "The server's port that listens for packets.")
+	randomize           = flag.Bool("randomize", true, "Randomize the UDP packet padding.")
+	runExpIncrease      = flag.Bool("run_exp_increase", true, "Run the exponential increase phase 1 beginning.")
+	runSearchOnly       = flag.Bool("run_search_only", false, "Run binary search only.")
+	increaseFactor      = flag.Int("increase_factor", 10, "Increase factor during exponential increase.")
+	decreaseFactor      = flag.Int("decrease_factor", 2, "Decrease factor during binary search.")
+	startSize           = flag.Int("start_size", 30, "The size of the smallest packet, in bytes.")
+	maxSize             = flag.Int("max_size", 64000, "The size of the largest packet, in bytes.")
+	phaseOneNumPackets  = flag.Int("phase_one_num_packets", 10, "The number of packets to send during the exponential increase phase.")
+	phaseTwoNumPackets  = flag.Int("phase_two_num_packets", 10, "The number of packets to send during the binary search phase.")
+	lossRate            = flag.Int("loss_rate", 70, "The acceptible rate of packets to receive before increasing the packet size.")
+	convergeSize        = flag.Int("converge_size", 200, "When the difference is packet sizes is less than converge_size, terminate the procedure.")
+	delayBetweenPackets = flag.Int("delay_between_packets", 1, "The time, in seconds, to wait between sending packets.")
 )
 
 const (
@@ -279,7 +280,7 @@ func runPing(count, size, timeoutLen int, Conn *net.UDPConn) (pingStats, error) 
 		}
 		// TODO(jvesuna): Change this delay between packets?
 		log.Println("Sent #", i)
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Duration(*delayBetweenPackets) * time.Second)
 	}
 
 	ps.wg.Wait() // This goes at the end.
