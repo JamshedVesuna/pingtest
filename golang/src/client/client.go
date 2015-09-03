@@ -60,7 +60,7 @@ const (
 	maxUDPSize = 65000
 	// timeoutMultiplier determines the timeout length for each packet. The timeout length is
 	// determined by timeoutMultiplier * max(delay of smallest ping size)
-	timeoutMultiplier = 5000
+	timeoutMultiplier = 50
 	// initialProbeTimeout is the default time to wait for each of the initial packets sent out to
 	// determine the average delay.
 	// TODO(jvesuna): Change this constant to something smarter.
@@ -143,7 +143,8 @@ func computeDelays(rcvPackets []receivedPacket, rcvTimes []int64) (float64, floa
 	var delays []int64
 	var timeDelay float64
 	for i, _ := range rcvPackets {
-		timeDelay = float64(rcvTimes[i]-*rcvPackets[i].message.PingtestParams.ClientTimestampNano) / float64(1000000)
+		timeDelay = float64(rcvTimes[i]-*rcvPackets[i].message.PingtestParams.ClientTimestampNano) /
+			float64(1000000)
 		delays = append(delays, int64(timeDelay))
 	}
 	sum := 0
@@ -173,7 +174,7 @@ func (ps *pingStats) clientReceiver(count, timeoutLen int, ServerConn *net.UDPCo
 	var rcvPackets []receivedPacket
 	var rcvTimes []int64
 
-	// TODO(jvesuna): Consider making everythin in the for loop a big goroutine.
+	// TODO(jvesuna): Consider making everything in the for loop a big goroutine.
 	for i := 0; i < count; i++ {
 		buf := make([]byte, maxUDPSize)
 		ServerConn.SetReadDeadline(time.Now().Add(time.Duration(timeoutLen) * time.Millisecond))
@@ -242,7 +243,6 @@ func runPing(count, size, timeoutLen int, Conn *net.UDPConn) (pingStats, error) 
 	log.Println("sending Conn is", Conn)
 
 	// TODO(jvesuna): Add Channel here.
-
 	for i := 0; i < count; i++ {
 		params := &ptpb.PingtestParams{
 			PacketIndex:         proto.Int64(int64(i)),
@@ -252,7 +252,7 @@ func runPing(count, size, timeoutLen int, Conn *net.UDPConn) (pingStats, error) 
 		// paddingLen is the number of bytes we should add to the payload.
 		paddingLen := int(math.Max(0, float64(size-proto.Size(params))))
 		var padding []byte
-		// Randomize the padding
+		// Randomize the padding.
 		if *randomize {
 			for i := 0; i < paddingLen; i++ {
 				padding = append(padding, byte(rand.Intn(10)))
@@ -283,7 +283,8 @@ func runPing(count, size, timeoutLen int, Conn *net.UDPConn) (pingStats, error) 
 		time.Sleep(time.Duration(*delayBetweenPackets) * time.Second)
 	}
 
-	ps.wg.Wait() // This goes at the end.
+	// Wait to receive all threads or timeout.
+	ps.wg.Wait()
 	return ps, nil
 }
 
@@ -293,8 +294,11 @@ func checkDefaults(oldClient *Client) (Client, error) {
 	if oldClient.RunExpIncrease && oldClient.RunSearchOnly {
 		return Client{}, errors.New("cannot run exponential increase AND binary search only flags together")
 	}
-	c := Client{IP: oldClient.IP, RunExpIncrease: oldClient.RunExpIncrease, RunSearchOnly: oldClient.RunSearchOnly,
-		Params: oldClient.Params}
+	c := Client{
+		IP:             oldClient.IP,
+		RunExpIncrease: oldClient.RunExpIncrease,
+		RunSearchOnly:  oldClient.RunSearchOnly,
+		Params:         oldClient.Params}
 	if c.IP == "" {
 		c.IP = "127.0.0.1"
 	}
@@ -345,7 +349,8 @@ func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor, t
 		ts.TotalBytesSent += c.Params.PhaseOneNumPackets * pktSize
 		// TODO(jvesuna): Fix timeoutLen.
 		ps, err := runPing(c.Params.PhaseOneNumPackets, pktSize, timeoutLen, Conn)
-		ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(pktSize))
+		ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) *
+			float64(pktSize))
 		if err != nil {
 			log.Fatalf("failed to ping host: %v", err)
 			return 0, TestStats{}, err
@@ -361,7 +366,8 @@ func (c *Client) expIncrease(ts TestStats, startSize, maxSize, increaseFactor, t
 			log.Printf("Total bytes attempted to send: %d", ts.TotalBytesSent)
 			log.Printf("Total MB attempted to send: %f", float64(ts.TotalBytesSent)/float64(1000000))
 			log.Printf("Total bytes dropped: %d", ts.TotalBytesDropped)
-			log.Printf("Net megabytes that made it: %f", float64(ts.TotalBytesSent-ts.TotalBytesDropped)/float64(1000000))
+			log.Printf("Net megabytes that made it: %f",
+				float64(ts.TotalBytesSent-ts.TotalBytesDropped)/float64(1000000))
 			ts.EstimatedMB, ts.EstimatedKb = bandwidth(pktSize, ps.mean)
 			return maxSize, ts, nil
 		}
@@ -380,7 +386,8 @@ func (c *Client) binarySearch(ts TestStats, minBytes, maxBytes, decreaseFactor i
 		ts.TotalBytesSent += c.Params.PhaseTwoNumPackets * middleGround
 		// TODO(jvesuna): Fix timeoutLen.
 		ps, err := runPing(c.Params.PhaseTwoNumPackets, middleGround, initialProbeTimeout, Conn)
-		ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseTwoNumPackets) * float64(middleGround))
+		ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseTwoNumPackets) *
+			float64(middleGround))
 		if err != nil {
 			log.Fatalf("failed to ping host: %v", err)
 			return 0, TestStats{}, err
@@ -408,7 +415,8 @@ func (c *Client) binarySearch(ts TestStats, minBytes, maxBytes, decreaseFactor i
 			log.Printf("Total bytes attempted to send: %d", ts.TotalBytesSent)
 			log.Printf("Total MB attempted to send: %f", float64(ts.TotalBytesSent)/float64(1000000))
 			log.Printf("Total bytes dropped: %d", ts.TotalBytesDropped)
-			log.Printf("Net megabytes that made it: %f", float64(ts.TotalBytesSent-ts.TotalBytesDropped)/float64(1000000))
+			log.Printf("Net megabytes that made it: %f",
+				float64(ts.TotalBytesSent-ts.TotalBytesDropped)/float64(1000000))
 			ts.EstimatedMB, ts.EstimatedKb = bandwidth(middleGround, ps.mean)
 			return middleGround, ts, nil
 		}
@@ -424,17 +432,19 @@ func (c *Client) runExpIncrease(ts TestStats, Conn *net.UDPConn) (TestStats, err
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.StartSize
 	// Wait 10 seconds per packet initially.
 	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, initialProbeTimeout, Conn)
-	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.StartSize))
+	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) *
+		float64(c.Params.StartSize))
 	if err != nil {
 		log.Println("failed to ping host")
 		return TestStats{}, err
 	}
 	// TODO(jvesuna): add some sanity checks
 	log.Printf("Initial ping results: %v", ps)
-	timeoutLen := int(math.Min(ps.max, 1)) * timeoutMultiplier
+	timeoutLen := int(math.Max(ps.max, 1)) * timeoutMultiplier
 
 	// Begin Phase 1: exponential increase.
-	pktSize, ts, err := c.expIncrease(ts, c.Params.StartSize, c.Params.MaxSize, c.Params.IncreaseFactor, timeoutLen, Conn)
+	pktSize, ts, err := c.expIncrease(ts, c.Params.StartSize, c.Params.MaxSize,
+		c.Params.IncreaseFactor, timeoutLen, Conn)
 	if err != nil {
 		return ts, err
 	}
@@ -471,17 +481,19 @@ func (c *Client) runSearchOnly(ts TestStats, Conn *net.UDPConn) (TestStats, erro
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.StartSize
 	// Wait 10 seconds per packet initially.
 	ps, err := runPing(c.Params.PhaseOneNumPackets, c.Params.StartSize, initialProbeTimeout, Conn)
-	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.StartSize))
+	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) *
+		float64(c.Params.StartSize))
 	if err != nil {
 		log.Println("failed to ping host: %v", err)
 		return TestStats{}, err
 	}
 	// TODO(jvesuna): add some sanity checks
-	timeoutLen := int(math.Min(ps.max, 1)) * timeoutMultiplier
+	timeoutLen := int(math.Max(ps.max, 1)) * timeoutMultiplier
 	// Then run largest packet size.
 	ts.TotalBytesSent += c.Params.PhaseOneNumPackets * c.Params.MaxSize
 	ps, err = runPing(c.Params.PhaseOneNumPackets, c.Params.MaxSize, timeoutLen, Conn)
-	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) * float64(c.Params.MaxSize))
+	ts.TotalBytesDropped += int(ps.loss * 0.01 * float64(c.Params.PhaseOneNumPackets) *
+		float64(c.Params.MaxSize))
 	if err != nil {
 		log.Fatalf("failed to ping host: %v", err)
 		return TestStats{}, err
@@ -493,12 +505,14 @@ func (c *Client) runSearchOnly(ts TestStats, Conn *net.UDPConn) (TestStats, erro
 		log.Printf("Total bytes *attempted* to send: %d", ts.TotalBytesSent)
 		log.Printf("Total MB *attempted* to send: %f", float64(ts.TotalBytesSent)/float64(1000000))
 		log.Printf("Total bytes dropped: %d", ts.TotalBytesDropped)
-		log.Printf("Net megabytes that made it: %f", float64(ts.TotalBytesSent-ts.TotalBytesDropped)/float64(1000000))
+		log.Printf("Net megabytes that made it: %f", float64(ts.TotalBytesSent-ts.TotalBytesDropped)/
+			float64(1000000))
 		ts.EstimatedMB, ts.EstimatedKb = bandwidth(c.Params.MaxSize, ps.mean)
 		return ts, nil
 	}
 	// Else if largest packet size fails, then run binary search.
-	pktSize, ts, err := c.binarySearch(ts, c.Params.StartSize, c.Params.MaxSize, c.Params.DecreaseFactor, Conn)
+	pktSize, ts, err := c.binarySearch(ts, c.Params.StartSize, c.Params.MaxSize,
+		c.Params.DecreaseFactor, Conn)
 	if err != nil {
 		return ts, err
 	}
